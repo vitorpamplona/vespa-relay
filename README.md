@@ -81,13 +81,34 @@ All configuration is through environment variables.
 | `RELAY_STATE_FILE` | path where NIP-86 ban/allow lists are persisted (survives restart) | unset ⇒ in-memory |
 | `RELAY_HTTP_URL` | the http(s) url NIP-98 auth events must be tagged with | derived from `RELAY_URL` |
 
-## What it supports
+## Supported NIPs
 
-NIP-01 (filters/publishes), 09 (deletion), 11 (relay info), 40 (expiration), 42
-(auth → per-user ranking), 45 (COUNT), 50 (search, plus the `sort:` / `filter:rank:` /
-`include:spam` / `observer:` extensions), 62 (vanish), 77 (negentropy), and — when
-`RELAY_ADMIN_PUBKEYS` is set — 86 (relay management: ban/allow pubkeys, events, and
-kinds, and change name/description/icon at runtime).
+| NIP | | In this relay |
+|---|---|---|
+| [01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Core protocol | Filters, publishes, subscriptions |
+| [09](https://github.com/nostr-protocol/nips/blob/master/09.md) | Event deletion | |
+| [11](https://github.com/nostr-protocol/nips/blob/master/11.md) | Relay info document | Identity and limits, served on the same port |
+| [40](https://github.com/nostr-protocol/nips/blob/master/40.md) | Expiration timestamps | Expired events are swept on a timer |
+| [42](https://github.com/nostr-protocol/nips/blob/master/42.md) | Authentication | Login switches search to your own web of trust |
+| [45](https://github.com/nostr-protocol/nips/blob/master/45.md) | Event counts | `COUNT` |
+| [50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search | Full-text, trust-ranked — the core feature |
+| [62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Right to vanish | |
+| [77](https://github.com/nostr-protocol/nips/blob/master/77.md) | Negentropy sync | |
+| [86](https://github.com/nostr-protocol/nips/blob/master/86.md) | Relay management | Ban/allow pubkeys, events, kinds; edit identity at runtime. Only when `RELAY_ADMIN_PUBKEYS` is set |
+
+### Search extensions (NIP-50)
+
+The `search` field accepts extra tokens beyond the query text. They are stripped from
+the query before matching, so they never become search terms.
+
+| token | effect |
+|---|---|
+| `sort:rank` | rank results by trust instead of relevance |
+| `filter:rank:gte:N` | drop results below trust rank `N` |
+| `include:spam` | lift the default trust floor and include everything |
+| `observer:<pubkey>` | rank as seen by that pubkey's web of trust |
+
+By default a search is trust-gated: results below the floor are hidden unless you lift it.
 
 ## Embed it
 
