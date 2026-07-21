@@ -1,6 +1,9 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.vanniktech.mavenPublish)
+    // For the standalone runnable (RelayMain): `./gradlew :relay:run` / installDist.
+    // Library consumers ignore it; the published artifact is unaffected.
+    application
 }
 
 dependencies {
@@ -12,6 +15,9 @@ dependencies {
     // The websocket mount for the composition root's Ktor app.
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.websockets)
+    // serveRelay bundles the Netty engine (batteries-included); runtime-only — not in
+    // serveRelay's signature, so consumers get it transitively without compiling against it.
+    implementation(libs.ktor.server.netty)
     testImplementation(kotlin("test"))
     // RelayProtocolTest drives the real protocol over InMemoryEventIndex, which is
     // production code in the store's transitively-exposed :vespa engine jar — no
@@ -21,6 +27,10 @@ dependencies {
 
 kotlin {
     jvmToolchain(21)
+}
+
+application {
+    mainClass = "com.vitorpamplona.quartz.eventstore.relay.RelayMainKt"
 }
 
 tasks.test {

@@ -37,10 +37,11 @@ dependencies {
 Released to Maven Central. For a commit snapshot, JitPack works too:
 `com.github.vitorpamplona.vespa-relay:relay:<commit>`.
 
+Batteries-included — `serveRelay` binds a port and serves the websocket, the NIP-11
+doc, and an optional landing page (it bundles the Ktor Netty engine):
+
 ```kotlin
-import com.vitorpamplona.quartz.eventstore.relay.NostrRelayServer
-import com.vitorpamplona.quartz.eventstore.relay.nostrRelay
-import com.vitorpamplona.quartz.eventstore.relay.relayInfoJson
+import com.vitorpamplona.quartz.eventstore.relay.*
 import com.vitorpamplona.quartz.eventstore.store.VespaEventStore
 
 val store = VespaEventStore.open("http://localhost:8080")
@@ -50,19 +51,36 @@ val relay = NostrRelayServer(
     relayUrl = myRelayUrl,                   // NIP-42 identity / NIP-62 vanish scope
     onObserver = { pubkey -> /* a NIP-42 login — enroll for sync, etc. */ },
 )
-
-// Mount it in a Ktor app, beside the NIP-11 doc served on GET / (nostr+json).
-routing { nostrRelay(relay) }
-// relayInfoJson(name = "my relay", selfPubkey = relayPubkey)  ->  the NIP-11 body
+serveRelay(relay, port = 7777, nip11 = Nip11Info(name = "my relay", selfPubkey = relayPubkey))
 ```
+
+Or wire the pieces into your own Ktor app yourself — `Route.nostrRelay(relay)` mounts
+the websocket and `relayInfoJson(...)` renders the NIP-11 body.
 
 The store never verifies signatures (many Nostr events are rumors), so the relay runs
 a `VerifyPolicy` on publishes — forged EVENTs are rejected before they reach the store.
 
+### Run it standalone
+
+The library is itself runnable — a serve-only relay against a Vespa, configured from
+the environment (`./gradlew :relay:run`, or the `installDist` scripts):
+
+```bash
+RELAY_URL=wss://relay.example.com VESPA_URL=http://localhost:8080 ./gradlew :relay:run
+```
+
+`RELAY_URL` is required (the relay's own ws url — its NIP-42 identity). Optional:
+`RELAY_PORT` (7777), `DEFAULT_OBSERVER` (64-hex; ranks anonymous searches), `AUTO_DEPLOY`
+(true), and the NIP-11 fields `RELAY_NAME` / `RELAY_DESCRIPTION` / `RELAY_ICON` /
+`RELAY_CONTACT_PUBKEY` / `RELAY_SELF_PUBKEY`. Filling the store from the network
+(crawl / trust-sync) is a separate concern — see [SoT](https://github.com/vitorpamplona/sot).
+
 ## Modules
 
 - **`:relay`** — `NostrRelayServer` (the protocol engine over the store), the
-  `Route.nostrRelay` websocket mount, and `relayInfoJson` (the NIP-11 doc).
+  `Route.nostrRelay` websocket mount, `relayInfoJson` (the NIP-11 doc), the
+  batteries-included `serveRelay` / `Nip11Info` (bind a port, bundling Netty), and a
+  runnable `main` (`RelayMain`) that serves a standalone relay from env config.
 
 ## Build
 
