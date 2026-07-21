@@ -103,7 +103,7 @@ the query before matching, so they never become search terms.
 
 | token | effect |
 |---|---|
-| `sort:rank` | rank results by trust instead of relevance |
+| `sort:rank` | order by trust, most trusted first (also `rank:asc`, `followers`, `text`) |
 | `filter:rank:gte:N` | drop results below trust rank `N` |
 | `include:spam` | lift the default trust floor and include everything |
 | `observer:<pubkey>` | rank as seen by that pubkey's web of trust |
