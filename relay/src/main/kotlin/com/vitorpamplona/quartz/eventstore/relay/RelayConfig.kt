@@ -96,15 +96,54 @@ fun negentropySettingsFromEnv(env: Map<String, String>): NegentropySettings {
  * from a comma/space-separated `RELAY_ADMIN_PUBKEYS`. Empty ⇒ NIP-86 disabled.
  * Entries that aren't 64-hex are dropped.
  */
-fun adminPubkeysFromEnv(env: Map<String, String>): Set<String> =
-    env["RELAY_ADMIN_PUBKEYS"]
+fun adminPubkeysFromEnv(env: Map<String, String>): Set<String> = parseHexSet(env["RELAY_ADMIN_PUBKEYS"])
+
+/**
+ * Static write authorization (geode's `[authorization]`): only these pubkeys may
+ * publish (`ALLOW_PUBKEYS`, empty ⇒ everyone), minus any on the denylist
+ * (`DENY_PUBKEYS`). Applied to EVENT commands before verification. Distinct from
+ * NIP-86 bans, which are a runtime-mutable denylist.
+ */
+fun allowPubkeysFromEnv(env: Map<String, String>): Set<String> = parseHexSet(env["ALLOW_PUBKEYS"])
+
+fun denyPubkeysFromEnv(env: Map<String, String>): Set<String> = parseHexSet(env["DENY_PUBKEYS"])
+
+/** Static kind authorization: `ALLOW_KINDS` (empty ⇒ all) minus `DENY_KINDS`. */
+fun allowKindsFromEnv(env: Map<String, String>): Set<Int> = parseIntSet(env["ALLOW_KINDS"])
+
+fun denyKindsFromEnv(env: Map<String, String>): Set<Int> = parseIntSet(env["DENY_KINDS"])
+
+/**
+ * Reject events whose `created_at` is more than this many seconds in the future
+ * (`REJECT_FUTURE_SECONDS`). 0 (the default) disables the check. Clock drift and
+ * back-dated notes past this bound are refused before ingest.
+ */
+fun rejectFutureSecondsFromEnv(env: Map<String, String>): Int = env["REJECT_FUTURE_SECONDS"]?.trim()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+
+/**
+ * How often (seconds) to sweep NIP-40 expired events from the store
+ * (`EXPIRATION_SWEEP_SECONDS`). 0 or negative disables the sweeper. Default 1h.
+ */
+fun expirationSweepSecondsFromEnv(env: Map<String, String>): Long = env["EXPIRATION_SWEEP_SECONDS"]?.trim()?.toLongOrNull() ?: 3_600L
+
+private val HEX64 = Regex("^[0-9a-f]{64}$")
+
+/** Split a comma/space/newline list into a deduped set of lowercased 64-hex keys. */
+private fun parseHexSet(raw: String?): Set<String> =
+    raw
         ?.split(',', ' ', '\n')
         ?.map { it.trim().lowercase() }
         ?.filter { it.matches(HEX64) }
         ?.toSet()
         .orEmpty()
 
-private val HEX64 = Regex("^[0-9a-f]{64}$")
+/** Split a comma/space/newline list into a deduped set of ints, dropping non-numeric entries. */
+private fun parseIntSet(raw: String?): Set<Int> =
+    raw
+        ?.split(',', ' ', '\n')
+        ?.mapNotNull { it.trim().toIntOrNull() }
+        ?.toSet()
+        .orEmpty()
 
 /** Parse an env var as Int, keeping [fallback] when absent, blank, or unparseable. */
 private fun Map<String, String>.intOr(

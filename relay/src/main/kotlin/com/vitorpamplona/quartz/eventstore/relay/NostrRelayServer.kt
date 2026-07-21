@@ -34,8 +34,11 @@ import com.vitorpamplona.quartz.nip01Core.relay.server.backend.LiveEventStore
 import com.vitorpamplona.quartz.nip01Core.relay.server.backend.RequestContext
 import com.vitorpamplona.quartz.nip01Core.relay.server.backend.SessionBackend
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.IRelayPolicy
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.KindAllowDenyPolicy
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.OptionalAuthPolicy
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.PolicyStack
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.PubkeyAllowDenyPolicy
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.RejectFutureEventsPolicy
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.RelayLimits
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.VerifyAuthOnlyPolicy
 import com.vitorpamplona.quartz.nip01Core.store.IEventStore
@@ -89,18 +92,30 @@ class NostrRelayServer(
     // rejected before ingest. Shared with the NIP-86 admin endpoint, which
     // mutates the same store.
     banStore: BanStore? = null,
+    // Static write authorization (deploy-time, not runtime like the banStore).
+    // Empty allowlists ⇒ permissive; denylists always subtract.
+    pubkeyAllow: Set<String> = emptySet(),
+    pubkeyDeny: Set<String> = emptySet(),
+    kindAllow: Set<Int> = emptySet(),
+    kindDeny: Set<Int> = emptySet(),
+    // Reject events dated more than this many seconds in the future; 0 disables.
+    rejectFutureSeconds: Int = 0,
     // Fires with each authenticated pubkey seen on a ranked read. This lets
     // the composition root enroll NIP-42 logins as sync observers
     // (SyncService.enroll dedups).
     onObserver: ((String) -> Unit)? = null,
 ) : RelayServerBase(
         // Events are verified in the ingest queue's parallel stage, so the
-        // policy only verifies AUTH. BanListPolicy (if present) rejects banned
-        // sources first; OptionalAuthPolicy issues the NIP-42 challenge.
+        // policy only verifies AUTH. Cheap rejections (bans, allow/deny lists,
+        // future-dated events) run first; OptionalAuthPolicy issues the NIP-42
+        // challenge. Only the policies an operator configured are installed.
         policyBuilder = {
             PolicyStack(
                 *listOfNotNull(
                     banStore?.let(::BanListPolicy),
+                    if (pubkeyAllow.isNotEmpty() || pubkeyDeny.isNotEmpty()) PubkeyAllowDenyPolicy(pubkeyAllow, pubkeyDeny) else null,
+                    if (kindAllow.isNotEmpty() || kindDeny.isNotEmpty()) KindAllowDenyPolicy(kindAllow, kindDeny) else null,
+                    if (rejectFutureSeconds > 0) RejectFutureEventsPolicy(rejectFutureSeconds) else null,
                     VerifyAuthOnlyPolicy,
                     OptionalAuthPolicy(relayUrl),
                 ).toTypedArray<IRelayPolicy>(),

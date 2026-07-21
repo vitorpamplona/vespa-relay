@@ -10,6 +10,8 @@ dependencies {
     api(libs.quartz)
     api(libs.vespa.eventstore.store)
     implementation(libs.kotlinx.coroutines)
+    // NIP-86 ban-list state is persisted to a JSON file (RelayStateStore).
+    implementation(libs.kotlinx.serialization.json)
     // The Ktor server: serveRelay binds a port over the Netty engine.
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.websockets)

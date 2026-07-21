@@ -86,4 +86,34 @@ class RelayConfigTest {
     fun `no admin pubkeys when unset`() {
         assertEquals(emptySet(), adminPubkeysFromEnv(emptyMap()))
     }
+
+    @Test
+    fun `write allow and deny lists parse pubkeys and kinds`() {
+        val a = "a".repeat(64)
+        val b = "b".repeat(64)
+        val env =
+            mapOf(
+                "ALLOW_PUBKEYS" to "${a.uppercase()} $b",
+                "DENY_PUBKEYS" to "not-hex",
+                "ALLOW_KINDS" to "0,1, 30023",
+                "DENY_KINDS" to "4, junk",
+            )
+        assertEquals(setOf(a, b), allowPubkeysFromEnv(env))
+        assertEquals(emptySet(), denyPubkeysFromEnv(env))
+        assertEquals(setOf(0, 1, 30023), allowKindsFromEnv(env))
+        assertEquals(setOf(4), denyKindsFromEnv(env))
+    }
+
+    @Test
+    fun `reject-future defaults off and clamps negatives`() {
+        assertEquals(0, rejectFutureSecondsFromEnv(emptyMap()))
+        assertEquals(900, rejectFutureSecondsFromEnv(mapOf("REJECT_FUTURE_SECONDS" to "900")))
+        assertEquals(0, rejectFutureSecondsFromEnv(mapOf("REJECT_FUTURE_SECONDS" to "-5")))
+    }
+
+    @Test
+    fun `expiration sweep interval defaults to an hour`() {
+        assertEquals(3_600L, expirationSweepSecondsFromEnv(emptyMap()))
+        assertEquals(60L, expirationSweepSecondsFromEnv(mapOf("EXPIRATION_SWEEP_SECONDS" to "60")))
+    }
 }

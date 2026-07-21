@@ -22,7 +22,7 @@ package com.vitorpamplona.quartz.eventstore.relay
 
 import com.vitorpamplona.quartz.eventstore.store.VespaEventStore
 import com.vitorpamplona.quartz.nip01Core.relay.normalizer.RelayUrlNormalizer
-import com.vitorpamplona.quartz.nip86RelayManagement.server.BanStore
+import com.vitorpamplona.quartz.nip01Core.relay.server.RelayServerListener
 
 /**
  * Run a standalone trust-ranking Nostr relay against a Vespa. This is the
@@ -71,10 +71,19 @@ fun main() {
 
     val limits = relayLimitsFromEnv(env)
     val negentropy = negentropySettingsFromEnv(env)
+    val rejectFutureSeconds = rejectFutureSecondsFromEnv(env)
 
-    // NIP-86 is enabled only when at least one valid admin key is configured.
+    // NIP-86 is enabled only when at least one valid admin key is configured;
+    // its ban lists persist to RELAY_STATE_FILE when set.
     val adminPubkeys = adminPubkeysFromEnv(env)
-    val banStore = if (adminPubkeys.isNotEmpty()) BanStore {} else null
+    val banStore = if (adminPubkeys.isNotEmpty()) openBanStore(env["RELAY_STATE_FILE"]) else null
+
+    val listener =
+        if (env["LOG_CONNECTIONS"]?.toBooleanStrictOrNull() == true) {
+            ConnectionCountListener()
+        } else {
+            RelayServerListener.None
+        }
 
     val store = VespaEventStore.open(vespaUrl, relay = relayUrl, autoDeploy = autoDeploy)
     val relay =
@@ -82,10 +91,19 @@ fun main() {
             store = store,
             defaultObserver = env["DEFAULT_OBSERVER"],
             relayUrl = relayUrl,
+            listener = listener,
             limits = limits,
             negentropySettings = negentropy,
             banStore = banStore,
+            pubkeyAllow = allowPubkeysFromEnv(env),
+            pubkeyDeny = denyPubkeysFromEnv(env),
+            kindAllow = allowKindsFromEnv(env),
+            kindDeny = denyKindsFromEnv(env),
+            rejectFutureSeconds = rejectFutureSeconds,
         )
+
+    // Prune NIP-40 expired events on a schedule (the store schedules nothing itself).
+    val sweeper = ExpirationSweeper(store, expirationSweepSecondsFromEnv(env)).start()
 
     val admin =
         banStore?.let {
@@ -100,6 +118,7 @@ fun main() {
 
     Runtime.getRuntime().addShutdownHook(
         Thread {
+            sweeper.close()
             relay.close()
             store.close()
         },

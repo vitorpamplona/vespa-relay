@@ -43,7 +43,13 @@ RELAY_URL=wss://relay.example.com VESPA_URL=http://localhost:8080 ./gradlew :rel
 | `RELAY_NAME` / `RELAY_DESCRIPTION` / `RELAY_ICON` / `RELAY_BANNER` / `RELAY_CONTACT_PUBKEY` / `RELAY_SELF_PUBKEY` / `RELAY_CONTACT` / `RELAY_VERSION` / `RELAY_POSTING_POLICY` / `RELAY_PRIVACY_POLICY` / `RELAY_TERMS_OF_SERVICE` | the NIP-11 identity (`RELAY_CONTACT` is a human contact; `RELAY_VERSION` overrides the build version) | — |
 | `MAX_MESSAGE_LENGTH` / `MAX_SUBSCRIPTIONS` / `MAX_FILTERS` / `MAX_LIMIT` / `DEFAULT_LIMIT` / `MAX_SUBID_LENGTH` / `MAX_EVENT_TAGS` / `MAX_CONTENT_LENGTH` / `MIN_POW_DIFFICULTY` / `CREATED_AT_LOWER_LIMIT` / `CREATED_AT_UPPER_LIMIT` | protection limits — enforced by the engine and rendered into the NIP-11 `limitation` block | sane defaults |
 | `NEG_FRAME_SIZE_LIMIT` / `NEG_MAX_SYNC_EVENTS` / `NEG_MAX_SESSIONS_PER_CONNECTION` | NIP-77 negentropy tuning (`NEG_MAX_SYNC_EVENTS` caps how many ids one reconciliation walks) | strfry-parity |
+| `ALLOW_PUBKEYS` / `DENY_PUBKEYS` | static write authorization — allowlist (empty ⇒ everyone) minus denylist, 64-hex, comma/space-separated | — |
+| `ALLOW_KINDS` / `DENY_KINDS` | static kind authorization — allow (empty ⇒ all) minus deny | — |
+| `REJECT_FUTURE_SECONDS` | reject events dated more than N seconds in the future | `0` (off) |
+| `EXPIRATION_SWEEP_SECONDS` | how often to prune NIP-40 expired events | `3600` (0 ⇒ off) |
+| `LOG_CONNECTIONS` | log the live websocket connection count on connect/disconnect | `false` |
 | `RELAY_ADMIN_PUBKEYS` | comma/space-separated 64-hex admin keys; when set, enables the NIP-86 management API (`POST /`, NIP-98 auth) | unset ⇒ NIP-86 off |
+| `RELAY_STATE_FILE` | path where NIP-86 ban/allow lists are persisted (survives restart) | unset ⇒ in-memory |
 | `RELAY_HTTP_URL` | the http(s) url NIP-98 auth events must be tagged with | derived from `RELAY_URL` |
 
 Vespa is a prerequisite, like a database. `docker compose up` stands one up for you;
