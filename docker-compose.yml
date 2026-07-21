@@ -1,0 +1,47 @@
+# The whole thing in one command: a single-node Vespa plus the trust-ranking relay.
+#
+#   docker compose up --build
+#
+# The relay deploys the bundled schema to Vespa on first run (AUTO_DEPLOY), then
+# serves the NIP-50 websocket, the NIP-11 doc, and the web UI on RELAY_PORT.
+# Filling the store from the network (crawl / trust-sync) is a separate service —
+# see SoT (github.com/vitorpamplona/sot).
+
+services:
+  vespa:
+    image: vespaengine/vespa
+    container_name: vespa
+    hostname: vespa
+    ports:
+      - "${VESPA_PORT:-8080}:8080" # query / document API
+      - "${VESPA_CONFIG_PORT:-19071}:19071" # config server
+    volumes:
+      - vespa_var:/opt/vespa/var
+    healthcheck:
+      test: ["CMD", "curl", "-fSs", "http://localhost:19071/state/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 60s
+    restart: unless-stopped
+
+  relay:
+    build: .
+    container_name: vespa-relay
+    depends_on:
+      vespa:
+        condition: service_healthy
+    environment:
+      VESPA_URL: http://vespa:8080
+      RELAY_PORT: 7777
+      # This relay's own public ws url (NIP-42 identity / NIP-62 vanish scope).
+      RELAY_URL: ${RELAY_URL:-ws://localhost:7777}
+      RELAY_NAME: ${RELAY_NAME:-vespa-relay}
+      # 64-hex pubkey whose web of trust ranks anonymous searches; empty = untrusted.
+      DEFAULT_OBSERVER: ${DEFAULT_OBSERVER:-}
+    ports:
+      - "${RELAY_PORT:-7777}:7777"
+    restart: unless-stopped
+
+volumes:
+  vespa_var:

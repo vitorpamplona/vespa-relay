@@ -7,8 +7,6 @@ plugins {
     // ("The Kotlin Gradle plugin was loaded multiple times in different subprojects").
     alias(libs.plugins.kotlin.jvm) apply false
     alias(libs.plugins.diffplug.spotless)
-    // Load once on the root classpath; the publishable module applies it (see :relay).
-    alias(libs.plugins.vanniktech.mavenPublish) apply false
 }
 
 val ktlintVersion = libs.versions.ktlint.get()

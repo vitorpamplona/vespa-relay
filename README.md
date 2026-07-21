@@ -1,107 +1,75 @@
 # vespa-relay
 
-A ready-to-serve [Nostr](https://nostr.com) relay over a
-[vespa-eventstore](https://github.com/vitorpamplona/vespa-eventstore) store, with
-**trust-ranked NIP-50 search**.
+A standalone, trust-ranking [Nostr](https://nostr.com) relay — full-text
+[NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) search ranked by
+the searcher's web of trust, backed by [Vespa](https://vespa.ai).
 
-It wires [Quartz](https://github.com/vitorpamplona/amethyst)'s relay protocol engine
-(`RelayServerBase` + `LiveEventStore`) to a `VespaEventStore`, adds a per-connection
-ranking observer, and hands you a Ktor websocket mount and the NIP-11 document. Point
-clients at it and they speak plain NIP-01 filters and NIP-50 search — ranked, when
-authenticated, by the searcher's own web of trust.
+Point clients at it and they speak plain NIP-01 filters and NIP-50 search over
+websockets. A NIP-42 login makes results ranked by *your* web of trust; anonymous
+searches rank by the operator's default. It bundles a web search UI (itself a Nostr
+client) served on the same port.
 
-This is the relay front door extracted from [SoT](https://github.com/vitorpamplona/sot)
-(Search over Trust). SoT is the reference application — relay + trust-sync — built on
-this library and vespa-eventstore.
+This is the relay half of [SoT](https://github.com/vitorpamplona/sot) (Search over
+Trust), split out to run on its own. It serves what's in the store; **filling** the
+store from the network (crawl / trust-sync) is a separate service — that's SoT.
 
-## What you get
+## Run it
 
-- **A Nostr relay in a few lines.** `NostrRelayServer` over any Quartz `IEventStore`
-  (use `vespa-eventstore`'s), inheriting full NIP-01 filters, NIP-50 search, live
-  subscriptions, EVENT publishes, NIP-45 COUNT, and server-side NIP-77 negentropy.
-- **Per-connection trust ranking.** NIP-42 auth switches the ranking observer: a
-  search runs through the authenticated user's web of trust, or the operator's
-  default when anonymous. The `onObserver` callback lets your app react to logins
-  (e.g. enroll them for sync) without the relay knowing anything about it.
-- **The NIP-11 doc and a websocket route**, ready to mount in your Ktor app.
+The whole thing in one command — a single-node Vespa plus the relay:
 
-## Quick start
-
-```kotlin
-dependencies {
-    implementation("com.vitorpamplona.quartz.eventstore:relay:0.1.0")
-    implementation("com.vitorpamplona.quartz.eventstore:store:0.1.0")
-}
+```bash
+docker compose up --build
+# NIP-50 relay + web UI on ws://localhost:7777
 ```
 
-Released to Maven Central. For a commit snapshot, JitPack works too:
-`com.github.vitorpamplona.vespa-relay:relay:<commit>`.
+The relay deploys the bundled Vespa schema on first run, then serves. Open
+`http://localhost:7777` for the search UI, or connect a Nostr client to the websocket.
 
-Batteries-included — `serveRelay` binds a port and serves the websocket, the NIP-11
-doc, and an optional landing page (it bundles the Ktor Netty engine):
-
-```kotlin
-import com.vitorpamplona.quartz.eventstore.relay.*
-import com.vitorpamplona.quartz.eventstore.store.VespaEventStore
-
-val store = VespaEventStore.open("http://localhost:8080")
-val relay = NostrRelayServer(
-    store = store,
-    defaultObserver = housePubkeyHex,       // ranks anonymous searches; null = untrusted
-    relayUrl = myRelayUrl,                   // NIP-42 identity / NIP-62 vanish scope
-    onObserver = { pubkey -> /* a NIP-42 login — enroll for sync, etc. */ },
-)
-serveRelay(relay, port = 7777, nip11 = Nip11Info(name = "my relay", selfPubkey = relayPubkey))
-```
-
-Or wire the pieces into your own Ktor app yourself — `Route.nostrRelay(relay)` mounts
-the websocket and `relayInfoJson(...)` renders the NIP-11 body.
-
-The store never verifies signatures (many Nostr events are rumors), so the relay runs
-a `VerifyPolicy` on publishes — forged EVENTs are rejected before they reach the store.
-
-### Run it standalone
-
-The library is itself runnable — a serve-only relay against a Vespa, configured from
-the environment (`./gradlew :relay:run`, or the `installDist` scripts):
+Or run it against an existing Vespa without Docker:
 
 ```bash
 RELAY_URL=wss://relay.example.com VESPA_URL=http://localhost:8080 ./gradlew :relay:run
 ```
 
-`RELAY_URL` is required (the relay's own ws url — its NIP-42 identity). Optional:
-`RELAY_PORT` (7777), `DEFAULT_OBSERVER` (64-hex; ranks anonymous searches), `AUTO_DEPLOY`
-(true), and the NIP-11 fields `RELAY_NAME` / `RELAY_DESCRIPTION` / `RELAY_ICON` /
-`RELAY_CONTACT_PUBKEY` / `RELAY_SELF_PUBKEY`. Filling the store from the network
-(crawl / trust-sync) is a separate concern — see [SoT](https://github.com/vitorpamplona/sot).
+### Configuration (environment)
 
-## Modules
+| var | meaning | default |
+|---|---|---|
+| `RELAY_URL` | this relay's own ws url — its NIP-42 identity / NIP-62 vanish scope | **required** |
+| `VESPA_URL` | the Vespa query endpoint | `http://localhost:8080` |
+| `RELAY_PORT` | port to listen on | `7777` |
+| `DEFAULT_OBSERVER` | 64-hex pubkey whose web of trust ranks anonymous searches | unset ⇒ untrusted |
+| `AUTO_DEPLOY` | deploy the bundled schema on first run | `true` |
+| `RELAY_NAME` / `RELAY_DESCRIPTION` / `RELAY_ICON` / `RELAY_CONTACT_PUBKEY` / `RELAY_SELF_PUBKEY` | the NIP-11 identity | — |
 
-- **`:relay`** — `NostrRelayServer` (the protocol engine over the store), the
-  `Route.nostrRelay` websocket mount, `relayInfoJson` (the NIP-11 doc), the
-  batteries-included `serveRelay` / `Nip11Info` (bind a port, bundling Netty), and a
-  runnable `main` (`RelayMain`) that serves a standalone relay from env config.
+Vespa is a prerequisite, like a database. `docker compose up` stands one up for you;
+otherwise point `VESPA_URL` at your own.
+
+## What it implements
+
+NIP-01 (filters/publishes), 09 (deletion), 11 (relay info), 40 (expiration), 42
+(auth → per-user ranking), 45 (COUNT), 50 (search, plus the `sort:` / `filter:rank:` /
+`include:spam` / `observer:` extensions), 62 (vanish), 77 (negentropy). Published
+events are signature-checked by a `VerifyPolicy` before they reach the store (the
+store itself never verifies — it also holds unsigned rumors).
+
+## Embed it instead
+
+The relay is also usable from your own JVM/Ktor app — `serveRelay(relay, port, nip11,
+landingPage)` binds a port batteries-included, or `Route.nostrRelay(relay)` +
+`relayInfoJson(...)` give you the pieces to mount in an existing server. See
+`NostrRelayServer` and `RelayApp.kt`.
 
 ## Build
 
 ```bash
 ./gradlew build     # compile + tests + spotlessCheck
+./gradlew :relay:run        # run against VESPA_URL / RELAY_URL from the environment
+./gradlew :relay:installDist # a runnable distribution under relay/build/install/vespa-relay
 ```
 
-Kotlin 2.4 / JDK 21. Quartz and vespa-eventstore come from JitPack, pinned by commit
-in `gradle/libs.versions.toml`.
-
-## Releasing
-
-Publishing uses the [vanniktech Maven Publish](https://github.com/vanniktech/gradle-maven-publish-plugin)
-plugin (the same one Quartz ships to Central with).
-
-- **CI** (`.github/workflows/build.yml`) runs `./gradlew build` on every push and PR to `main`.
-- **Release** (`.github/workflows/create-release.yml`) publishes to Maven Central on a
-  `v*` tag. It needs four repo secrets: `SONATYPE_USERNAME`, `SONATYPE_PASSWORD`,
-  `SIGNING_PRIVATE_KEY` (armored GPG key), `SIGNING_PASSWORD`.
-
-Bump the version in `gradle/libs.versions.toml` (`app`), tag `vX.Y.Z`, and push the tag.
+Kotlin 2.4 / JDK 21. Quartz and the [vespa-eventstore](https://github.com/vitorpamplona/vespa-eventstore)
+store come from JitPack, pinned by commit in `gradle/libs.versions.toml`.
 
 ## License
 

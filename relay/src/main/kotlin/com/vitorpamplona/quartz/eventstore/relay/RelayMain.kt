@@ -77,5 +77,10 @@ fun main() {
                 contactPubkey = env["RELAY_CONTACT_PUBKEY"],
                 selfPubkey = env["RELAY_SELF_PUBKEY"],
             ),
+        // The bundled web UI (a NIP-50 client) — served on a plain browser GET.
+        landingPage = webUi(),
     )
 }
+
+/** The bundled search UI (`resources/index.html`), or null if it isn't on the classpath. */
+private fun webUi(): String? = object {}.javaClass.getResource("/index.html")?.readText()

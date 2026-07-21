@@ -1,9 +1,7 @@
 [versions]
 kotlin = "2.4.0"
-# The library version published to Maven Central (com.vitorpamplona.quartz.eventstore:relay).
+# The relay application's version (image tag / --version display).
 app = "0.1.0"
-# vanniktech's Maven Publish plugin — the same one Quartz ships to Central with.
-mavenPublish = "0.37.0"
 # Quartz from JitPack (amethyst @ commit) — the Nostr protocol engine (RelayServerBase).
 quartz = "0d534a3149"
 # The event store this relay serves, from JitPack (vespa-eventstore @ commit).
@@ -31,4 +29,3 @@ ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor"
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 diffplug-spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
-vanniktech-mavenPublish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
