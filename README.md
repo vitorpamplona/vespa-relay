@@ -8,9 +8,8 @@ Point a [Nostr](https://nostr.com) client at it. It speaks NIP-01 filters and NI
 search over websockets. Log in with NIP-42 to rank results by your own web of trust.
 Anonymous searches use the operator's default. A web search UI ships on the same port.
 
-This is the relay half of [SoT](https://github.com/vitorpamplona/sot) (Search over
-Trust), split out to run on its own. It serves what is in the store. Filling the store
-from the network — crawling and trust-sync — is a separate job. That is SoT.
+It serves what is in the store. Filling the store from the network — crawling and
+trust-sync — is a separate job.
 
 ## Run it
 
