@@ -1,0 +1,31 @@
+[versions]
+kotlin = "2.4.0"
+# The library version published to Maven Central (com.vitorpamplona.quartz.eventstore:relay).
+app = "0.1.0"
+# vanniktech's Maven Publish plugin — the same one Quartz ships to Central with.
+mavenPublish = "0.37.0"
+# Quartz from JitPack (amethyst @ commit) — the Nostr protocol engine (RelayServerBase).
+quartz = "0d534a3149"
+# The event store this relay serves, from JitPack (vespa-eventstore @ commit).
+vespaEventStore = "ce546def72"
+coroutines = "1.11.0"
+serialization = "1.11.0"
+ktor = "3.5.1"
+spotless = "8.8.0"
+ktlint = "1.8.0"
+
+[libraries]
+quartz = { module = "com.github.vitorpamplona.amethyst:quartz", version.ref = "quartz" }
+# The event store, from JitPack. `store` is the IEventStore + open() front door + the
+# ObserverContext/OriginalFilters this relay stamps; it api-exposes the `vespa` engine
+# jar transitively (InMemoryEventIndex, EventYql — used by the relay's protocol test).
+vespa-eventstore-store = { module = "com.github.vitorpamplona.vespa-eventstore:store", version.ref = "vespaEventStore" }
+kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-websockets = { module = "io.ktor:ktor-server-websockets", version.ref = "ktor" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+diffplug-spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+vanniktech-mavenPublish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
