@@ -23,6 +23,7 @@ package com.vitorpamplona.quartz.eventstore.relay
 import com.vitorpamplona.quartz.eventstore.store.ObserverContext
 import com.vitorpamplona.quartz.eventstore.store.OriginalFilters
 import com.vitorpamplona.quartz.nip01Core.core.Event
+import com.vitorpamplona.quartz.nip01Core.crypto.verify
 import com.vitorpamplona.quartz.nip01Core.relay.commands.toClient.CountResult
 import com.vitorpamplona.quartz.nip01Core.relay.filters.Filter
 import com.vitorpamplona.quartz.nip01Core.relay.normalizer.NormalizedRelayUrl
@@ -32,13 +33,19 @@ import com.vitorpamplona.quartz.nip01Core.relay.server.backend.IngestQueue
 import com.vitorpamplona.quartz.nip01Core.relay.server.backend.LiveEventStore
 import com.vitorpamplona.quartz.nip01Core.relay.server.backend.RequestContext
 import com.vitorpamplona.quartz.nip01Core.relay.server.backend.SessionBackend
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.IRelayPolicy
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.KindAllowDenyPolicy
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.OptionalAuthPolicy
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.PolicyStack
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.PubkeyAllowDenyPolicy
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.RejectFutureEventsPolicy
 import com.vitorpamplona.quartz.nip01Core.relay.server.policies.RelayLimits
-import com.vitorpamplona.quartz.nip01Core.relay.server.policies.VerifyPolicy
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.VerifyAuthOnlyPolicy
 import com.vitorpamplona.quartz.nip01Core.store.IEventStore
 import com.vitorpamplona.quartz.nip01Core.store.IdAndTime
 import com.vitorpamplona.quartz.nip77Negentropy.NegentropySettings
+import com.vitorpamplona.quartz.nip86RelayManagement.server.BanListPolicy
+import com.vitorpamplona.quartz.nip86RelayManagement.server.BanStore
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withContext
@@ -52,10 +59,18 @@ import kotlin.coroutines.CoroutineContext
  * [LiveEventStore]. The store supplies storage semantics and
  * `snapshotIdsForNegentropy`.
  *
- * Each connection runs two policies. [VerifyPolicy] requires published events
- * to carry a valid id and signature, because the store itself never verifies.
- * [OptionalAuthPolicy] sends a NIP-42 challenge on connect but gates nothing
- * on it.
+ * Each connection runs a small policy stack. [VerifyAuthOnlyPolicy] verifies
+ * NIP-42 AUTH events inline; EVENT publishes are NOT verified here — instead
+ * [IngestQueue] verifies their id and signature in a parallel stage off the
+ * hot path (the store itself never verifies). An optional [BanListPolicy]
+ * (present only when NIP-86 admin is configured) rejects banned pubkeys and
+ * event ids before they reach the queue. [OptionalAuthPolicy] sends a NIP-42
+ * challenge on connect but gates nothing on it.
+ *
+ * [limits] are enforced by the engine (which auto-installs a LimitsPolicy) and
+ * also drive the NIP-11 `limitation` block, so what the doc advertises and
+ * what the relay rejects can never disagree. [negentropySettings] bound NIP-77
+ * reconciliation (frame size, max events synced, sessions per connection).
  *
  * What auth does change is ranking. [ObserverRoutingBackend] resolves the
  * observer for every REQ/COUNT: the authenticated pubkey, or else
@@ -71,19 +86,50 @@ class NostrRelayServer(
     relayUrl: NormalizedRelayUrl,
     parentContext: CoroutineContext = SupervisorJob(),
     listener: RelayServerListener = RelayServerListener.None,
-    limits: RelayLimits? = null,
+    limits: RelayLimits? = defaultRelayLimits(),
+    negentropySettings: NegentropySettings = NegentropySettings.Default,
+    // When set, published events from banned pubkeys / banned event ids are
+    // rejected before ingest. Shared with the NIP-86 admin endpoint, which
+    // mutates the same store.
+    banStore: BanStore? = null,
+    // Static write authorization (deploy-time, not runtime like the banStore).
+    // Empty allowlists ⇒ permissive; denylists always subtract.
+    pubkeyAllow: Set<String> = emptySet(),
+    pubkeyDeny: Set<String> = emptySet(),
+    kindAllow: Set<Int> = emptySet(),
+    kindDeny: Set<Int> = emptySet(),
+    // Reject events dated more than this many seconds in the future; 0 disables.
+    rejectFutureSeconds: Int = 0,
     // Fires with each authenticated pubkey seen on a ranked read. This lets
     // the composition root enroll NIP-42 logins as sync observers
     // (SyncService.enroll dedups).
     onObserver: ((String) -> Unit)? = null,
 ) : RelayServerBase(
-        policyBuilder = { PolicyStack(VerifyPolicy, OptionalAuthPolicy(relayUrl)) },
+        // Events are verified in the ingest queue's parallel stage, so the
+        // policy only verifies AUTH. Cheap rejections (bans, allow/deny lists,
+        // future-dated events) run first; OptionalAuthPolicy issues the NIP-42
+        // challenge. Only the policies an operator configured are installed.
+        policyBuilder = {
+            PolicyStack(
+                *listOfNotNull(
+                    banStore?.let(::BanListPolicy),
+                    if (pubkeyAllow.isNotEmpty() || pubkeyDeny.isNotEmpty()) PubkeyAllowDenyPolicy(pubkeyAllow, pubkeyDeny) else null,
+                    if (kindAllow.isNotEmpty() || kindDeny.isNotEmpty()) KindAllowDenyPolicy(kindAllow, kindDeny) else null,
+                    if (rejectFutureSeconds > 0) RejectFutureEventsPolicy(rejectFutureSeconds) else null,
+                    VerifyAuthOnlyPolicy,
+                    OptionalAuthPolicy(relayUrl),
+                ).toTypedArray<IRelayPolicy>(),
+            )
+        },
         parentContext = parentContext,
-        negentropySettings = NegentropySettings.Default,
+        negentropySettings = negentropySettings,
         listener = listener,
         limits = limits,
     ) {
-    private val ingest = IngestQueue(store = store, parentContext = parentContext)
+    // The queue verifies each event's id + signature in its own parallel stage
+    // (off the connection's hot path), which is why the policy stack only needs
+    // VerifyAuthOnlyPolicy. Invalid events get an InsertOutcome.Rejected -> OK:false.
+    private val ingest = IngestQueue(store = store, parentContext = parentContext, verify = { it.verify() })
 
     override val backend: SessionBackend = ObserverRoutingBackend(LiveEventStore(store, ingest), defaultObserver, onObserver)
 

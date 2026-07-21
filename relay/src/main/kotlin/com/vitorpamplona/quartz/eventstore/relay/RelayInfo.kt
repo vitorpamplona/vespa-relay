@@ -20,15 +20,77 @@
  */
 package com.vitorpamplona.quartz.eventstore.relay
 
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.RelayLimits
+import com.vitorpamplona.quartz.nip11RelayInfo.Nip11RelayInformation
 import com.vitorpamplona.quartz.nip11RelayInfo.relayInformation
+import java.util.Properties
 
 private const val SOFTWARE = "https://github.com/vitorpamplona/vespa-relay"
-private const val VERSION = "2.0"
 
 /**
- * The NIP-11 relay information document (served on `GET /` with Accept:
- * application/nostr+json). Identity comes from the composition root's config;
- * the technical fields describe what [NostrRelayServer] actually implements.
+ * The NIPs this relay actually implements, in the order they are advertised.
+ * NIP-86 (relay management) is not here: it is appended by the composition
+ * root only when an admin key is configured, so the doc never claims an admin
+ * API that would reject every request.
+ */
+val BASE_SUPPORTED_NIPS = listOf(1, 9, 11, 40, 42, 45, 50, 62, 77)
+
+private object RelayInfoMarker
+
+/**
+ * The relay's own version, sourced from the build (the `app` version in the
+ * Gradle version catalog, written into `relay-version.properties` by the
+ * `generateVersionProperties` task) so the NIP-11 `version` tracks releases
+ * instead of drifting from a hand-edited constant. Falls back to `"dev"` when
+ * the generated resource isn't on the classpath (e.g. running from raw
+ * sources without the generating task).
+ */
+val BUILD_VERSION: String by lazy {
+    RelayInfoMarker::class.java
+        .getResourceAsStream("/relay-version.properties")
+        ?.use { stream ->
+            Properties().apply { load(stream) }.getProperty("version")
+        }?.takeIf { it.isNotBlank() } ?: "dev"
+}
+
+/**
+ * Build the NIP-11 relay information document object. Identity comes from the
+ * composition root's config; the technical fields describe what
+ * [NostrRelayServer] actually implements. The `limitation` block is derived
+ * from the same [RelayLimits] the engine enforces, so what the doc advertises
+ * and what the relay rejects can never disagree.
+ *
+ * The object (rather than only its JSON) is returned so the composition root
+ * can hold it mutably and let NIP-86 admin RPCs (change name/description/icon)
+ * update it at runtime.
+ */
+fun buildRelayInfo(
+    info: Nip11Info,
+    limits: RelayLimits,
+    supportedNips: List<Int> = BASE_SUPPORTED_NIPS,
+): Nip11RelayInformation =
+    relayInformation {
+        this.name = info.name
+        info.description.ifSet { this.description = it }
+        info.icon.ifSet { this.icon = it }
+        info.banner.ifSet { this.banner = it }
+        info.contactPubkey.ifSet { pubkey = it } // admin contact key
+        info.selfPubkey.ifSet { self = it } // the relay's OWN key
+        info.contact.ifSet { this.contact = it } // human contact (email / uri)
+        info.postingPolicy.ifSet { this.postingPolicy = it }
+        info.privacyPolicy.ifSet { this.privacyPolicy = it }
+        info.termsOfService.ifSet { this.termsOfService = it }
+        software = SOFTWARE
+        version = info.version ?: BUILD_VERSION
+        supports(*supportedNips.toIntArray())
+        // The limitation block IS the enforced RelayLimits, not a duplicate.
+        limitation(limits)
+    }
+
+/**
+ * The NIP-11 relay information document as JSON (served on `GET /` with
+ * Accept: application/nostr+json). Kept as a convenience over [buildRelayInfo]
+ * for the simple case and for tests.
  */
 fun relayInfoJson(
     name: String = "vespa-relay",
@@ -36,25 +98,25 @@ fun relayInfoJson(
     icon: String? = null,
     contactPubkey: String? = null,
     selfPubkey: String? = null,
+    contact: String? = null,
+    version: String? = null,
+    limits: RelayLimits = defaultRelayLimits(),
+    supportedNips: List<Int> = BASE_SUPPORTED_NIPS,
 ): String =
-    relayInformation {
-        this.name = name
-        description.ifSet { this.description = it }
-        icon.ifSet { this.icon = it }
-        contactPubkey.ifSet { pubkey = it } // admin contact
-        selfPubkey.ifSet { self = it } // the relay's OWN key
-        software = SOFTWARE
-        version = VERSION
-        // 01 filters+publishes, 09 deletion, 11 this doc, 40 expiration,
-        // 42 optional auth (picks the ranking observer), 45 COUNT,
-        // 50 search, 62 vanish, 77 negentropy — all store- or engine-enforced.
-        supports(1, 9, 11, 40, 42, 45, 50, 62, 77)
-        limitation {
-            authRequired = false // OptionalAuthPolicy: auth only switches the ranking observer
-            paymentRequired = false
-            restrictedWrites = false // VerifyPolicy-gated EVENT publishes go to the store
-        }
-    }.toJson()
+    buildRelayInfo(
+        info =
+            Nip11Info(
+                name = name,
+                description = description,
+                icon = icon,
+                contactPubkey = contactPubkey,
+                selfPubkey = selfPubkey,
+                contact = contact,
+                version = version,
+            ),
+        limits = limits,
+        supportedNips = supportedNips,
+    ).toJson()
 
 /** Run [set] with this string only when it's present and non-blank. */
-private inline fun String?.ifSet(set: (String) -> Unit) = this?.takeIf(String::isNotBlank)?.let(set)
+internal inline fun String?.ifSet(set: (String) -> Unit) = this?.takeIf(String::isNotBlank)?.let(set)
