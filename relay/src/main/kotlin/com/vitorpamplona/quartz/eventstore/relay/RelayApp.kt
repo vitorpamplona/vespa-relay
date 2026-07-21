@@ -20,6 +20,8 @@
  */
 package com.vitorpamplona.quartz.eventstore.relay
 
+import com.vitorpamplona.quartz.nip01Core.relay.server.policies.RelayLimits
+import com.vitorpamplona.quartz.nip11RelayInfo.Nip11RelayInformation
 import io.ktor.http.ContentType
 import io.ktor.server.application.install
 import io.ktor.server.engine.EmbeddedServer
@@ -34,14 +36,21 @@ import io.ktor.server.websocket.WebSockets
 /**
  * The NIP-11 relay identity served on `GET /` (Accept: application/nostr+json).
  * Everything but [name] is optional. [selfPubkey] is the relay's OWN key;
- * [contactPubkey] is the admin contact.
+ * [contactPubkey] is the admin contact key; [contact] is a human contact
+ * string (email/uri). [version] overrides the build-derived version.
  */
 data class Nip11Info(
     val name: String = "vespa-relay",
     val description: String? = null,
     val icon: String? = null,
+    val banner: String? = null,
     val contactPubkey: String? = null,
     val selfPubkey: String? = null,
+    val contact: String? = null,
+    val version: String? = null,
+    val postingPolicy: String? = null,
+    val privacyPolicy: String? = null,
+    val termsOfService: String? = null,
 )
 
 /**
@@ -51,6 +60,11 @@ data class Nip11Info(
  *   WS   /  -> the NIP-50 relay ([nostrRelay]: full filters, search, COUNT, NIP-77)
  *   GET  /  -> the NIP-11 doc on Accept: application/nostr+json, else [landingPage]
  *              (e.g. a web UI) — or a plain notice when it is null.
+ *   POST /  -> the NIP-86 relay-management RPC, when [admin] is configured.
+ *
+ * The NIP-11 doc is built from [nip11], [limits] (its `limitation` block) and
+ * [supportedNips], then held mutably so NIP-86 change-name/description/icon RPCs
+ * update what `GET /` serves at runtime.
  *
  * Returns the started server; call `stop(...)` to shut it down. With [wait] = true
  * (the default) it blocks until the server stops, which is what a `main()` wants;
@@ -63,30 +77,43 @@ fun serveRelay(
     relay: NostrRelayServer,
     port: Int,
     nip11: Nip11Info,
+    limits: RelayLimits = defaultRelayLimits(),
+    supportedNips: List<Int> = BASE_SUPPORTED_NIPS,
+    admin: Nip86Admin? = null,
     landingPage: String? = null,
     wait: Boolean = true,
-): EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration> =
-    embeddedServer(Netty, port = port) {
+): EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration> {
+    // NIP-86 advertises itself in supported_nips only when an admin is wired.
+    val effectiveNips = if (admin != null) supportedNips + 86 else supportedNips
+    val info = MutableRelayInfo(buildRelayInfo(nip11, limits, effectiveNips))
+
+    return embeddedServer(Netty, port = port) {
         install(WebSockets)
         routing {
             nostrRelay(relay)
             get("/") {
                 val accept = call.request.headers["Accept"] ?: ""
                 if (accept.contains("application/nostr+json")) {
-                    call.respondText(
-                        relayInfoJson(
-                            name = nip11.name,
-                            description = nip11.description,
-                            icon = nip11.icon,
-                            contactPubkey = nip11.contactPubkey,
-                            selfPubkey = nip11.selfPubkey,
-                        ),
-                        ContentType.parse("application/nostr+json"),
-                    )
+                    call.respondText(info.get().toJson(), ContentType.parse("application/nostr+json"))
                 } else {
                     landingPage?.let { call.respondText(it, ContentType.Text.Html) }
                         ?: call.respondText("${nip11.name} - a NIP-50 search relay; connect a WebSocket here.")
                 }
             }
+            admin?.let { nip86Admin(it, info) }
         }
     }.start(wait = wait)
+}
+
+/** A mutable holder for the live NIP-11 document, updated by NIP-86 admin RPCs. */
+internal class MutableRelayInfo(
+    initial: Nip11RelayInformation,
+) : com.vitorpamplona.quartz.nip86RelayManagement.server.Nip86Server.InfoHolder {
+    @Volatile private var current: Nip11RelayInformation = initial
+
+    override fun get(): Nip11RelayInformation = current
+
+    override fun set(value: Nip11RelayInformation) {
+        current = value
+    }
+}

@@ -41,4 +41,34 @@ class RelayInfoTest {
         assertEquals("false", limitation.getValue("auth_required").jsonPrimitive.content)
         assertTrue("restricted_writes" in limitation)
     }
+
+    @Test
+    fun `limitation block mirrors the enforced RelayLimits`() {
+        val doc = Json.parseToJsonElement(relayInfoJson(limits = defaultRelayLimits())).jsonObject
+        val limitation = doc.getValue("limitation").jsonObject
+        assertEquals(20, limitation.getValue("max_filters").jsonPrimitive.int)
+        assertEquals(50, limitation.getValue("max_subscriptions").jsonPrimitive.int)
+        assertEquals(5_000, limitation.getValue("max_limit").jsonPrimitive.int)
+    }
+
+    @Test
+    fun `carries the human contact and an explicit version override`() {
+        val doc =
+            Json
+                .parseToJsonElement(
+                    relayInfoJson(contact = "mailto:admin@example.com", version = "9.9-test"),
+                ).jsonObject
+        assertEquals("mailto:admin@example.com", doc.getValue("contact").jsonPrimitive.content)
+        assertEquals("9.9-test", doc.getValue("version").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `advertises NIP-86 only when it is wired`() {
+        val withAdmin =
+            Json.parseToJsonElement(relayInfoJson(supportedNips = BASE_SUPPORTED_NIPS + 86)).jsonObject
+        assertTrue(86 in withAdmin.getValue("supported_nips").jsonArray.map { it.jsonPrimitive.int })
+        // Default (no admin) never claims 86.
+        val plain = Json.parseToJsonElement(relayInfoJson()).jsonObject
+        assertTrue(86 !in plain.getValue("supported_nips").jsonArray.map { it.jsonPrimitive.int })
+    }
 }
